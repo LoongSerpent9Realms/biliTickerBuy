@@ -2,11 +2,11 @@ import base64
 import os
 import threading
 import time
-from argparse import Namespace
 
 import gradio as gr
 import loguru
 
+from app_cmd.cli_args import TickerCliArgs
 from app_version import get_app_version
 from util import get_application_path
 
@@ -21,15 +21,16 @@ def shutdown_app_process(delay_seconds: float = 1.0) -> None:
     threading.Timer(delay_seconds, lambda: os._exit(0)).start()
 
 
-def ticker_cmd(args: Namespace):
-    from tab.go import go_settings_tab, go_start_tab
+def ticker_cmd(args: TickerCliArgs):
+    from tab.go import go_start_tab
+    from tab.config import go_settings_tab
     from tab.log import log_tab, refresh_log_panel, refresh_task_panel
     from tab.problems import problems_tab
     from tab.settings import login_tab, setting_tab
     from tab.update import update_tab
-    from util.log_web import attach_log_routes
-    from util import ConfigDB, LOG_DIR
-    from util.LogConfig import loguru_config
+    from util.log.LogWeb import attach_log_routes
+    from util import ConfigDB, GLOBAL_COOKIE_PATH, LOG_DIR, TEMP_PATH
+    from util.log.LogConfig import loguru_config
 
     loguru_config(LOG_DIR, "app.log", enable_console=True, file_colorize=False)
     assets_dir = os.path.join(get_application_path(), "assets")
@@ -73,17 +74,19 @@ def ticker_cmd(args: Namespace):
     def refresh_all_task_panels():
         go_refresh_token, go_panel_update = refresh_task_panel()
         log_refresh_token, log_panel_update = refresh_log_panel()
+        go_start_updates = load_go_start_configs()
         return (
             go_refresh_token,
             go_panel_update,
             log_refresh_token,
             log_panel_update,
+            go_start_updates,
         )
 
     with gr.Blocks(
         title="biliTickerBuy",
-        css=css_path,
-        head="""
+    ) as demo:
+        launch_head = """
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -167,8 +170,7 @@ def ticker_cmd(args: Namespace):
             else {setTimeout(enhance,500);setTimeout(watchDropdownEnhance,300);}
         })();
         </script>
-        """,
-    ) as demo:
+        """
         with gr.Column(elem_classes="btb-app-shell"):
             header_ui = gr.HTML(header, visible=not hide_header)
             with gr.Tabs(elem_id="btb-main-tabs", elem_classes="btb-top-tabs"):
@@ -177,9 +179,21 @@ def ticker_cmd(args: Namespace):
                 with gr.Tab("生成配置", id="config", elem_id="btb-tab-config"):
                     setting_tab()
                 with gr.Tab("操作抢票", id="go", elem_id="btb-tab-go"):
-                    go_task_refresh_token, go_task_panel = go_start_tab()
-                with gr.Tab("高级设置", id="advanced", elem_id="btb-tab-advanced"):
-                    go_settings_tab(header_ui)
+                    (
+                        go_task_refresh_token,
+                        go_task_panel,
+                        load_go_start_configs,
+                        go_start_load_outputs,
+                    ) = go_start_tab()
+                with gr.Tab(
+                    "高级设置",
+                    id="advanced",
+                    elem_id="btb-tab-advanced",
+                ) as advanced_tab:
+                    (
+                        load_go_settings_configs,
+                        go_settings_load_outputs,
+                    ) = go_settings_tab(header_ui)
                 with gr.Tab("项目说明", id="guide", elem_id="btb-tab-guide"):
                     problems_tab()
                 with gr.Tab("软件更新", id="update", elem_id="btb-tab-update"):
@@ -194,17 +208,41 @@ def ticker_cmd(args: Namespace):
                 go_task_panel,
                 log_task_refresh_token,
                 log_task_panel,
+                *go_start_load_outputs,
             ],
+        )
+        advanced_tab.select(
+            fn=load_go_settings_configs,
+            inputs=None,
+            outputs=go_settings_load_outputs,
+            show_progress="hidden",
+            queue=False,
         )
 
     is_docker = os.path.exists("/.dockerenv") or os.environ.get("BTB_DOCKER") == "1"
+    allowed_paths: list[str] = []
+    for candidate in [
+        os.environ.get("BTB_CONFIG_PATH"),
+        GLOBAL_COOKIE_PATH,
+        LOG_DIR,
+        TEMP_PATH,
+    ]:
+        if not candidate:
+            continue
+        target = candidate if os.path.isdir(candidate) else os.path.dirname(candidate)
+        if target and os.path.exists(target) and target not in allowed_paths:
+            allowed_paths.append(target)
+
     demo.launch(
         share=args.share or is_docker,
         inbrowser=not is_docker,
         server_name=args.server_name,
         server_port=args.port,
+        allowed_paths=allowed_paths,
         prevent_thread_lock=True,
-        show_api=False,
+        footer_links=[],
+        css_paths=css_path,
+        head=launch_head,
     )
     attach_log_routes(demo.app)
     try:

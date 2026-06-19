@@ -11,20 +11,14 @@ from datetime import datetime
 from util import GlobalStatusInstance
 from util import LOG_DIR
 from util import log_file_name
-from util.log_web import build_log_view_url
-from util.task_markers import TASK_COMPLETED_MARKER, TASK_STOPPED_MARKER
+from util.log.LogWeb import build_log_view_url
 
+TASK_COMPLETED_MARKER = "抢票完成后退出程序。。。。。"
+TASK_STOPPED_MARKER = "BTB_TASK_STOPPED_BY_USER"
 TASK_STATUS_RUNNING = "运行中"
 TASK_STATUS_STOPPED = "已主动结束"
 TASK_STATUS_COMPLETED = "已完成"
 TASK_STATUS_EXITED = "已结束"
-OPEN_LOG_JS = """
-(url) => {
-    if (url) {
-        window.open(url, "_blank", "noopener,noreferrer");
-    }
-}
-"""
 OPEN_PAYMENT_URLS_JS = """
 (payload) => {
     if (!payload) {
@@ -424,7 +418,7 @@ def render_task_manager_panel(task_panel):
         with gr.Column(elem_classes="btb-task-grid"):
             for entry in visible_task_entries():
                 status_class = _status_class(entry.status)
-                with gr.Group(elem_classes=f"btb-task-card {status_class}"):
+                with gr.Column(elem_classes=f"btb-task-card {status_class}"):
                     gr.HTML(
                         """
                         <div class="btb-task-card__head">
@@ -446,9 +440,11 @@ def render_task_manager_panel(task_panel):
                         )
                     )
                     with gr.Row(elem_classes="btb-task-card__actions"):
-                        view_btn = gr.Button(
+                        gr.Button(
                             "查看",
                             elem_classes="btb-soft-button btb-task-button btb-task-button--view",
+                            link=build_log_view_url(entry.log_file),
+                            link_target="_blank",
                             scale=0,
                             min_width=84,
                         )
@@ -463,12 +459,6 @@ def render_task_manager_panel(task_panel):
                                 fn=lambda pid=entry.pid: stop_task(pid),
                                 outputs=[refresh_token, task_panel],
                             )
-                        view_btn.click(
-                            fn=None,
-                            inputs=gr.State(build_log_view_url(entry.log_file)),
-                            outputs=None,
-                            js=OPEN_LOG_JS,
-                        )
                         remove_btn = gr.Button(
                             "移除",
                             elem_classes="btb-soft-button btb-task-button btb-task-button--remove",
@@ -556,7 +546,7 @@ def log_tab():
                         os.path.getmtime(log_file)
                     ).strftime("%Y-%m-%d %H:%M:%S")
 
-                    with gr.Group(elem_classes=f"btb-task-card {status_class}"):
+                    with gr.Column(elem_classes=f"btb-task-card {status_class}"):
                         gr.HTML(
                             """
                             <div class="btb-task-card__head">
@@ -573,17 +563,13 @@ def log_tab():
                                 log_path=_render_log_path(log_file),
                             )
                         )
-                        view_btn = gr.Button(
+                        gr.Button(
                             "查看",
                             elem_classes="btb-soft-button btb-task-button btb-task-button--view",
+                            link=build_log_view_url(log_file),
+                            link_target="_blank",
                             scale=0,
                             min_width=84,
-                        )
-                        view_btn.click(
-                            fn=None,
-                            inputs=gr.State(build_log_view_url(log_file)),
-                            outputs=None,
-                            js=OPEN_LOG_JS,
                         )
 
         refresh_btn.click(

@@ -14,14 +14,11 @@ import requests
 from app_update import UPDATE_CHANNEL_STABLE, ReleaseInfo, UpdateError, fetch_update
 from app_version import get_app_version
 from util import ConfigDB, EXE_PATH
-
-UPDATE_CHANNEL_KEY = "update_channel"
-PACKAGE_NAME = "bilitickerbuy"
+from util.Constant import PACKAGE_NAME, UPDATE_CHANNEL_KEY
 
 
 def _saved_channel() -> str:
-    ConfigDB.get(UPDATE_CHANNEL_KEY)
-    return UPDATE_CHANNEL_STABLE
+    return str(ConfigDB.get(UPDATE_CHANNEL_KEY) or UPDATE_CHANNEL_STABLE)
 
 
 def _format_update(release: ReleaseInfo | None, channel: str) -> str:
@@ -99,7 +96,7 @@ def _update_hint(channel: str) -> str:
 
 
 def _check_updates(channel: str | None = None):
-    channel = UPDATE_CHANNEL_STABLE
+    channel = channel or _saved_channel()
     ConfigDB.insert(UPDATE_CHANNEL_KEY, channel)
     try:
         release = fetch_update(get_app_version(), channel)
@@ -127,6 +124,14 @@ def run_stable_update_check():
     return _check_updates(UPDATE_CHANNEL_STABLE)
 
 
+def show_update_loading():
+    return (
+        '<div class="btb-update-status"><strong>正在检查更新…</strong></div>',
+        None,
+        gr.update(),
+    )
+
+
 def update_tab(demo: gr.Blocks):
     status = gr.HTML(
         '<div class="btb-update-status"><strong>正在检查更新…</strong></div>'
@@ -140,4 +145,11 @@ def update_tab(demo: gr.Blocks):
 
     check_outputs = [status, release_state, notice]
     demo.load(load_update_check, outputs=check_outputs)
-    stable_button.click(run_stable_update_check, outputs=check_outputs)
+    stable_button.click(
+        show_update_loading,
+        outputs=check_outputs,
+        show_progress="hidden",
+    ).then(
+        run_stable_update_check,
+        outputs=check_outputs,
+    )

@@ -4,16 +4,15 @@ import time
 import loguru
 import requests
 from requests import Response
-from util.BrowerState import (
+from util.Constant import H2_LIMITS, H2_TIMEOUT
+from util.request.BrowerState import (
     BrowserFingerprintState,
     build_headers_from_browser_state,
     finalize_device_id,
     generate_browser_fingerprint_state,
 )
-from util.CookieManager import CookieManager
-from util.ProxyManager import ProxyManager
-
-DEFAULT_TIMEOUT = (3.05, 8)
+from util.request.CookieManager import CookieManager
+from util.proxy.ProxyManager import ProxyManager
 
 
 class BiliRequest:
@@ -44,7 +43,6 @@ class BiliRequest:
         )
         self.request_count = 0  # 记录请求次数
         self.proxy_manager.apply_to_session(self.session)
-        self.use_h2 = False
         self._h2_client = None
         self.createTime = int(time.time() * 1000)
 
@@ -145,7 +143,8 @@ class BiliRequest:
             http2=True,
             verify=verify,
             proxy=proxy,
-            timeout=DEFAULT_TIMEOUT,
+            timeout=httpx.Timeout(**H2_TIMEOUT),
+            limits=httpx.Limits(**H2_LIMITS),
             headers={
                 "accept": "*/*",
                 "accept-encoding": "gzip, deflate, br, zstd",
@@ -153,6 +152,23 @@ class BiliRequest:
                 "user-agent": self.headers.get("user-agent", ""),
             },
         )
+
+    def prewarm_h2_connection(self, url: str) -> None:
+        import httpx
+
+        if self._h2_client is None:
+            self._h2_client = self._build_h2_client()
+        client = self._h2_client
+        client.headers["user-agent"] = self.headers.get("user-agent", "")
+        for cookie in self.cookieManager.get_cookies(force=True) or []:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            if name and value is not None:
+                client.cookies.set(name, value, domain=".bilibili.com")
+        try:
+            client.head(url)
+        except httpx.HTTPError:
+            pass
 
     def _h2_send(self, method: str, url, data=None, isJson=False):
         if self._h2_client is None:
@@ -171,26 +187,7 @@ class BiliRequest:
         return client.get(url, params=data)
 
     def _request(self, method: str, url, data=None, isJson=False):
-        if self.use_h2:
-            return self._h2_send(method, url, data=data, isJson=isJson)
-        self.headers["cookie"] = self.cookieManager.get_cookies_str()
-        if isJson:
-            self.headers["Content-Type"] = "application/json"
-            response = self.session.request(
-                method, url, json=data, headers=self.headers, timeout=DEFAULT_TIMEOUT
-            )
-        else:
-            self.headers["Content-Type"] = "application/x-www-form-urlencoded"
-            request_kwargs = (
-                {"params": data} if method.lower() == "get" else {"data": data}
-            )
-            response = self.session.request(
-                method,
-                url,
-                headers=self.headers,
-                timeout=DEFAULT_TIMEOUT,
-                **request_kwargs,
-            )
+        response = self._h2_send(method, url, data=data, isJson=isJson)
 
         if response.status_code == 412:
             self.request_count += 1
